@@ -7,6 +7,7 @@
  */
 import { spawn } from "node:child_process";
 import { access } from "node:fs/promises";
+import { buildChildEnv } from "../lib/run.mjs";
 
 // ── CLI 設定 ─────────────────────────────────────────────────────────────────
 // 每個 CLI 的預設 ENTRY 路徑（與 lib/*.mjs 對齊），用 env override 也可以。
@@ -84,6 +85,7 @@ function whereCommand(cmd) {
       stdio: ["ignore", "pipe", "pipe"],
       shell: false,
       windowsHide: true,
+      env: buildChildEnv(),
     });
     let stdout = "";
     let stderr = "";
@@ -120,6 +122,7 @@ function runWithTimeout(cmd, args, timeoutMs = 8000) {
       stdio: ["ignore", "pipe", "pipe"],
       shell: needsShell,
       windowsHide: true,
+      env: buildChildEnv(),
     });
     let stdout = "";
     let stderr = "";

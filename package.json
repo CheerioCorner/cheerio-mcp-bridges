@@ -1,6 +1,6 @@
 {
   "name": "cheerio-mcp-bridges",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "type": "module",
   "description": "Narrow MCP bridge servers that let an orchestrating agent drive four coding CLIs (pi, agy, codex, copilot) in headless mode. Each bridge is independent — install only the ones your machine has.",
