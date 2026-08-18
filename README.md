@@ -41,6 +41,8 @@
 - **Copilot/Codex 都無法非互動查詢剩餘總額度**：
   - Copilot：`copilot billing` / `copilot limits` 是 help topic，只在互動模式 UI 裡有用。非互動 CLI 沒有 `copilot usage` 之類的指令。bridge 只能從 `model.call_failure` 事件裡的 `quotaSnapshots` 拿到「這次失敗時的快照」，無法主動查詢剩餘。
   - Codex：`codex login status` 只顯示登入方式（`Logged in using ChatGPT`），沒有用量/配額查詢。`codex doctor` 只做安裝診斷。bridge 的 `turn.completed.usage` 只有當次 token 用量，無剩餘額度。
+- **企業級 TLS 攔截 Proxy 可能導致 `npm install` 失敗**：某些組織會使用 TLS 檢查型 Proxy（例如資安廠商的憑證攔截方案）對 HTTPS 流量做中間人解密。這會讓 Node.js 的 TLS 驗證失敗，`npm install` 報 `UNABLE_TO_GET_ISSUER_CERT_LOCALLY` 或 `certificate chain incomplete` 之類的錯誤。解法：設定環境變數 `NODE_EXTRA_CA_CERTS` 指向公司的完整憑證鏈檔案（PEM 格式），注意需要的是 CA 中繼憑證（intermediate cert），不是只有 leaf cert。
+- **GitHub Copilot Enterprise 的 IP allow list 可能阻擋 CLI 存取**：如果你的 GitHub Copilot Enterprise 帳號啟用了 IP allow list，`ask_copilot` 可能會直接被 API 擋下（錯誤訊息類似 "enterprise has an IP allow list enabled, and your IP address is not permitted"）。這跟 bridge / MCP 設定完全無關，需要找 GitHub Enterprise 管理員確認目前的出口 IP 有沒有在白名單，或者是不是需要透過特定 VPN / 公司網路才能使用。
 
 ---
 

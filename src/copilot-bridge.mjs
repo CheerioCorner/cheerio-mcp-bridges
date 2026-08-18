@@ -6,6 +6,15 @@ import { randomUUID } from "node:crypto";
 import { runCopilot, COPILOT_CWD } from "../lib/copilot.mjs";
 import { appendAudit } from "../lib/audit.mjs";
 
+/**
+ * Truncate a string to maxLen characters, keeping the HEAD (where errors usually are).
+ * Appends a visible marker when truncation occurs.
+ */
+function truncate(s, maxLen) {
+  if (!s || s.length <= maxLen) return s || null;
+  return s.slice(0, maxLen) + "... (truncated)";
+}
+
 const server = new McpServer({ name: "copilot-bridge", version: "0.1.0" });
 
 server.registerTool(
@@ -77,6 +86,8 @@ server.registerTool(
       };
     }
 
+    const stderrSnippet = result.stderr ? truncate(result.stderr, 2000) : null;
+
     await appendAudit("copilot", {
       sessionId: result.sessionId || sessionId,
       prompt,
@@ -87,6 +98,7 @@ server.registerTool(
       timedOut: result.timedOut,
       hadError: result.hadError,
       error: result.error,
+      stderr: stderrSnippet,
       usage: result.usage,
       durationMs: result.durationMs,
       quotaSnapshots: result.quotaSnapshots,
@@ -97,11 +109,12 @@ server.registerTool(
       exit_code: result.exitCode,
       timed_out: result.timedOut,
       error: result.error,
+      stderr: stderrSnippet,
       usage: result.usage,
       quota_snapshots: result.quotaSnapshots,
     };
     const body =
-      (result.response?.trim() || result.error || "(copilot returned no text)") +
+      (result.response?.trim() || result.error || stderrSnippet || "(copilot returned no text)") +
       "\n\n---\n" +
       "copilot-bridge metadata: " +
       JSON.stringify(meta);

@@ -6,6 +6,15 @@ import { randomUUID } from "node:crypto";
 import { runCodex, CODEX_CWD } from "../lib/codex.mjs";
 import { appendAudit } from "../lib/audit.mjs";
 
+/**
+ * Truncate a string to maxLen characters, keeping the HEAD (where errors usually are).
+ * Appends a visible marker when truncation occurs.
+ */
+function truncate(s, maxLen) {
+  if (!s || s.length <= maxLen) return s || null;
+  return s.slice(0, maxLen) + "... (truncated)";
+}
+
 const server = new McpServer({ name: "codex-bridge", version: "0.1.0" });
 
 server.registerTool(
@@ -60,6 +69,8 @@ server.registerTool(
       };
     }
 
+    const stderrSnippet = result.stderr ? truncate(result.stderr, 2000) : null;
+
     await appendAudit("codex", {
       threadId: result.threadId || threadId,
       prompt,
@@ -68,6 +79,7 @@ server.registerTool(
       exitCode: result.exitCode,
       timedOut: result.timedOut,
       hadError: result.hadError,
+      stderr: stderrSnippet,
       usage: result.usage,
       durationMs: result.durationMs,
     });
@@ -76,10 +88,11 @@ server.registerTool(
       thread_id: result.threadId || threadId,
       exit_code: result.exitCode,
       timed_out: result.timedOut,
+      stderr: stderrSnippet,
       usage: result.usage,
     };
     const body =
-      (result.text || "(codex returned no text)") +
+      (result.text || stderrSnippet || "(codex returned no text)") +
       "\n\n---\n" +
       "codex-bridge metadata: " +
       JSON.stringify(meta);
