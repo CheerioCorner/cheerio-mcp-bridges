@@ -1,0 +1,25 @@
+{
+  "name": "cheerio-mcp-bridges",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Narrow MCP bridge servers that let an orchestrating agent drive four coding CLIs (pi, agy, codex, copilot) in headless mode. Each bridge is independent — install only the ones your machine has.",
+  "bin": {
+    "pi-bridge": "src/pi-bridge.mjs",
+    "agy-bridge": "src/agy-bridge.mjs",
+    "codex-bridge": "src/codex-bridge.mjs",
+    "copilot-bridge": "src/copilot-bridge.mjs"
+  },
+  "scripts": {
+    "start:pi": "node src/pi-bridge.mjs",
+    "start:agy": "node src/agy-bridge.mjs",
+    "start:codex": "node src/codex-bridge.mjs",
+    "start:copilot": "node src/copilot-bridge.mjs",
+    "doctor": "node scripts/doctor.mjs",
+    "test": "node --test test/parsers.test.mjs"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.0",
+    "zod": "^3.23.8"
+  }
+}
