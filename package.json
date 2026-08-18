@@ -16,7 +16,7 @@
     "start:codex": "node src/codex-bridge.mjs",
     "start:copilot": "node src/copilot-bridge.mjs",
     "doctor": "node scripts/doctor.mjs",
-    "test": "node --test test/parsers.test.mjs"
+    "test": "node --test test/parsers.test.mjs test/run.test.mjs"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.0.0",

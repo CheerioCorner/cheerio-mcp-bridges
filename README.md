@@ -42,7 +42,7 @@
   - Copilot：`copilot billing` / `copilot limits` 是 help topic，只在互動模式 UI 裡有用。非互動 CLI 沒有 `copilot usage` 之類的指令。bridge 只能從 `model.call_failure` 事件裡的 `quotaSnapshots` 拿到「這次失敗時的快照」，無法主動查詢剩餘。
   - Codex：`codex login status` 只顯示登入方式（`Logged in using ChatGPT`），沒有用量/配額查詢。`codex doctor` 只做安裝診斷。bridge 的 `turn.completed.usage` 只有當次 token 用量，無剩餘額度。
 - **企業級 TLS 攔截 Proxy 可能導致 `npm install` 失敗**：某些組織會使用 TLS 檢查型 Proxy（例如資安廠商的憑證攔截方案）對 HTTPS 流量做中間人解密。這會讓 Node.js 的 TLS 驗證失敗，`npm install` 報 `UNABLE_TO_GET_ISSUER_CERT_LOCALLY` 或 `certificate chain incomplete` 之類的錯誤。解法：設定環境變數 `NODE_EXTRA_CA_CERTS` 指向公司的完整憑證鏈檔案（PEM 格式），注意需要的是 CA 中繼憑證（intermediate cert），不是只有 leaf cert。
-- **GitHub Copilot Enterprise 的 IP allow list 可能阻擋 CLI 存取**：如果你的 GitHub Copilot Enterprise 帳號啟用了 IP allow list，`ask_copilot` 可能會直接被 API 擋下（錯誤訊息類似 "enterprise has an IP allow list enabled, and your IP address is not permitted"）。這跟 bridge / MCP 設定完全無關，需要找 GitHub Enterprise 管理員確認目前的出口 IP 有沒有在白名單，或者是不是需要透過特定 VPN / 公司網路才能使用。
+- **企業級 IP allow list 擋 CLI 存取**（bridge 預設已處理）：如果你的帳號所屬的企業級方案（例如 GitHub Copilot Enterprise）啟用了 IP allow list，`ask_copilot` 可能會被 API 擋下（錯誤訊息類似 "enterprise has an IP allow list enabled, and your IP address is not permitted"）。**根本原因通常是**：bridge server 的父進程環境帶有 `HTTP_PROXY`/`HTTPS_PROXY` 之類的 proxy 設定，子進程的 CLI 工具繼承了這些 proxy 變數，導致 OAuth 請求繞經企業 proxy 出去，而 proxy 的出口 IP 不在對方的 allow list 內。**bridge 從 v0.2.0 開始預設會自動 strip 掉子進程 env 裡的 proxy 環境變數**（`HTTP_PROXY`/`HTTPS_PROXY`/`ALL_PROXY` 含大小寫變體），讓 CLI 直接對外連線來避開這個問題。如果你的環境情況相反（必須經過 proxy 才連得到目標服務），可以設 `BRIDGE_BYPASS_PROXY=false` 切回讓子進程繼承 proxy 設定。
 
 ---
 
@@ -217,3 +217,6 @@ npm test              # 執行 parser/arg-builder 單元測試（不花 API 額�
 | `COPILOT_BRIDGE_ENTRY` | `copilot.cmd` 路徑 |
 | `COPILOT_BRIDGE_TIMEOUT_MS` | `300000` |
 | `MCP_BRIDGE_LOG_DIR` | `<repo>/logs` |
+| `BRIDGE_BYPASS_PROXY` | `true` |
+
+`BRIDGE_BYPASS_PROXY`：bridge 預設會在呼叫底層 CLI 前 strip 掉子進程 env 裡的 `HTTP_PROXY`/`HTTPS_PROXY`/`ALL_PROXY`（含大小寫變體），避免子進程被父進程繼承到的企業 proxy 設定牽連。只有明確設成字串 `"false"` 時才關閉 strip 行為。
