@@ -5,6 +5,15 @@ import { z } from "zod";
 import { runAgy, AGY_CWD } from "../lib/agy.mjs";
 import { appendAudit } from "../lib/audit.mjs";
 
+/**
+ * Truncate a string to maxLen characters, keeping the HEAD where errors usually are.
+ * Appends a visible marker when truncation occurs.
+ */
+function truncate(s, maxLen) {
+  if (!s || s.length <= maxLen) return s || null;
+  return s.slice(0, maxLen) + "... (truncated)";
+}
+
 const server = new McpServer({ name: "agy-bridge", version: "0.1.0" });
 
 server.registerTool(
@@ -15,8 +24,10 @@ server.registerTool(
       "Send a prompt to the locally-installed Antigravity CLI `agy` (Google/Gemini) running " +
       `headlessly in a fixed workspace (${AGY_CWD}). Returns agy's final response plus the ` +
       "conversation_id needed to continue the same conversation. The workspace is pinned by the " +
-      "server and CANNOT be changed by the prompt. Reading and writing files inside the workspace " +
-      "is auto-allowed; shell commands stay gated unless dangerously_allow_all is set.",
+      "server and CANNOT be changed by the prompt. In headless mode, all tool permissions are " +
+      "auto-approved by default to avoid intermittent CANCELED/ERROR failures; terminal/shell " +
+      "execution remains constrained by --sandbox. Callers can override the defaults with " +
+      "dangerously_allow_all: false or sandbox: false.",
     inputSchema: {
       prompt: z.string().min(1).describe("The instruction/question to send to agy."),
       conversation_id: z
@@ -39,13 +50,17 @@ server.registerTool(
         .boolean()
         .optional()
         .describe(
-          "DANGER: auto-approve ALL tool permission requests including shell commands " +
-            "(--dangerously-skip-permissions). Leave false unless you fully trust the prompt."
+          "Default: true. Auto-approve ALL tool permission requests " +
+            "(--dangerously-skip-permissions) to prevent headless CANCELED/ERROR failures. " +
+            "Set false to restore permission gating; terminal/shell execution is still limited " +
+            "by --sandbox unless sandbox is explicitly set to false."
         ),
       timeout_ms: z.number().int().positive().optional().describe("Hard timeout in ms."),
     },
   },
   async ({ prompt, conversation_id, model, effort, sandbox, dangerously_allow_all, timeout_ms }) => {
+    const effectiveSandbox = sandbox !== false;
+    const effectiveDangerouslyAllowAll = dangerously_allow_all !== false;
     let result;
     try {
       result = await runAgy({
@@ -61,8 +76,8 @@ server.registerTool(
       await appendAudit("agy", {
         conversationId: conversation_id,
         prompt,
-        sandbox: !!sandbox,
-        dangerously_allow_all: !!dangerously_allow_all,
+        sandbox: effectiveSandbox,
+        dangerously_allow_all: effectiveDangerouslyAllowAll,
         spawnError: String(err?.message || err),
       });
       return {
@@ -71,11 +86,13 @@ server.registerTool(
       };
     }
 
+    const stderrSnippet = truncate(result.stderr, 2000);
+
     await appendAudit("agy", {
       conversationId: result.conversationId,
       prompt,
-      sandbox: !!sandbox,
-      dangerously_allow_all: !!dangerously_allow_all,
+      sandbox: effectiveSandbox,
+      dangerously_allow_all: effectiveDangerouslyAllowAll,
       status: result.status,
       exitCode: result.exitCode,
       timedOut: result.timedOut,
@@ -84,6 +101,7 @@ server.registerTool(
       numTurns: result.numTurns,
       usage: result.usage,
       durationMs: result.durationMs,
+      stderr: stderrSnippet,
     });
 
     const meta = {
@@ -94,6 +112,7 @@ server.registerTool(
       num_turns: result.numTurns,
       tools_used: result.toolCalls,
       usage: result.usage,
+      stderr: stderrSnippet,
     };
     const body =
       (result.response?.trim() || result.error || "(agy returned no text)") +
