@@ -2,20 +2,27 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
-import { randomUUID } from "node:crypto";
 import { runCopilot, COPILOT_CWD } from "../lib/copilot.mjs";
 import { appendAudit } from "../lib/audit.mjs";
+import {
+  checkAvailability as defaultCheck,
+  recordBlocked as defaultRecord,
+  clearBlocked as defaultClear,
+  resetProbeClaimedUntil as defaultResetProbe,
+} from "../lib/availability.mjs";
+import { createAskCopilotHandler } from "../lib/copilot-handler.mjs";
 
-/**
- * Truncate a string to maxLen characters, keeping the HEAD (where errors usually are).
- * Appends a visible marker when truncation occurs.
- */
-function truncate(s, maxLen) {
-  if (!s || s.length <= maxLen) return s || null;
-  return s.slice(0, maxLen) + "... (truncated)";
-}
+// ── Production setup ────────────────────────────────────────────────────────
 
 const server = new McpServer({ name: "copilot-bridge", version: "0.1.0" });
+const askCopilot = createAskCopilotHandler({
+  run: runCopilot,
+  audit: appendAudit,
+  checkAvailability: defaultCheck,
+  recordBlocked: defaultRecord,
+  clearBlocked: defaultClear,
+  resetProbeClaimedUntil: defaultResetProbe,
+});
 
 server.registerTool(
   "ask_copilot",
@@ -58,72 +65,7 @@ server.registerTool(
       timeout_ms: z.number().int().positive().optional().describe("Hard timeout in ms."),
     },
   },
-  async ({ prompt, session_id, model, effort, max_ai_credits, dangerously_allow_all, timeout_ms }) => {
-    const sessionId = session_id || randomUUID();
-    let result;
-    try {
-      result = await runCopilot({
-        prompt,
-        sessionId: session_id || undefined,
-        model,
-        effort,
-        maxAiCredits: max_ai_credits,
-        dangerouslyAllowAll: dangerously_allow_all,
-        timeoutMs: timeout_ms,
-      });
-    } catch (err) {
-      await appendAudit("copilot", {
-        sessionId,
-        prompt,
-        model,
-        effort,
-        dangerously_allow_all: !!dangerously_allow_all,
-        spawnError: String(err?.message || err),
-      });
-      return {
-        isError: true,
-        content: [{ type: "text", text: `Failed to launch copilot: ${err?.message || err}` }],
-      };
-    }
-
-    const stderrSnippet = result.stderr ? truncate(result.stderr, 2000) : null;
-
-    await appendAudit("copilot", {
-      sessionId: result.sessionId || sessionId,
-      prompt,
-      model,
-      effort,
-      dangerously_allow_all: !!dangerously_allow_all,
-      exitCode: result.exitCode,
-      timedOut: result.timedOut,
-      hadError: result.hadError,
-      error: result.error,
-      stderr: stderrSnippet,
-      usage: result.usage,
-      durationMs: result.durationMs,
-      quotaSnapshots: result.quotaSnapshots,
-    });
-
-    const meta = {
-      session_id: result.sessionId || sessionId,
-      exit_code: result.exitCode,
-      timed_out: result.timedOut,
-      error: result.error,
-      stderr: stderrSnippet,
-      usage: result.usage,
-      quota_snapshots: result.quotaSnapshots,
-    };
-    const body =
-      (result.response?.trim() || result.error || stderrSnippet || "(copilot returned no text)") +
-      "\n\n---\n" +
-      "copilot-bridge metadata: " +
-      JSON.stringify(meta);
-
-    return {
-      isError: result.hadError,
-      content: [{ type: "text", text: body }],
-    };
-  }
+  askCopilot
 );
 
 const transport = new StdioServerTransport();

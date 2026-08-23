@@ -1,44 +1,44 @@
 {
-  "//": "MENU: Pick only the bridges your machine has CLI support for. Do not copy all four blindly. Adjust paths/env to match this machine.",
+  "//": "MENU: Pick only the bridges your machine has CLI support for. Do not copy all four blindly. Replace every </path/...> placeholder below with real absolute paths for this machine.",
   "mcpServers": {
     "pi-bridge": {
       "command": "node",
-      "args": ["C:/Cheerio/Claude/mcp-bridges/src/pi-bridge.mjs"],
+      "args": ["</path/to/mcp-bridges>/src/pi-bridge.mjs"],
       "env": {
-        "PI_BRIDGE_CWD": "C:/Cheerio/pi",
-        "PI_BRIDGE_ENTRY": "C:/Users/User/AppData/Roaming/npm/node_modules/@earendil-works/pi-coding-agent/dist/cli.js",
+        "PI_BRIDGE_CWD": "</path/to/your/working/directory>",
+        "PI_BRIDGE_ENTRY": "</path/to/pi-coding-agent>/dist/cli.js",
         "PI_BRIDGE_TIMEOUT_MS": "300000",
-        "MCP_BRIDGE_LOG_DIR": "C:/Cheerio/Claude/mcp-bridges/logs"
+        "MCP_BRIDGE_LOG_DIR": "</path/to/mcp-bridges>/logs"
       }
     },
     "agy-bridge": {
       "command": "node",
-      "args": ["C:/Cheerio/Claude/mcp-bridges/src/agy-bridge.mjs"],
+      "args": ["</path/to/mcp-bridges>/src/agy-bridge.mjs"],
       "env": {
-        "AGY_BRIDGE_CWD": "C:/Cheerio",
-        "AGY_BRIDGE_ENTRY": "C:/Users/User/AppData/Local/agy/bin/agy.exe",
+        "AGY_BRIDGE_CWD": "</path/to/your/working/directory>",
+        "AGY_BRIDGE_ENTRY": "</path/to/agy>/bin/agy.exe",
         "AGY_BRIDGE_TIMEOUT_MS": "300000",
-        "MCP_BRIDGE_LOG_DIR": "C:/Cheerio/Claude/mcp-bridges/logs"
+        "MCP_BRIDGE_LOG_DIR": "</path/to/mcp-bridges>/logs"
       }
     },
     "codex-bridge": {
       "command": "node",
-      "args": ["C:/Cheerio/Claude/mcp-bridges/src/codex-bridge.mjs"],
+      "args": ["</path/to/mcp-bridges>/src/codex-bridge.mjs"],
       "env": {
-        "CODEX_BRIDGE_CWD": "C:/Cheerio/pi",
-        "CODEX_BRIDGE_ENTRY": "C:/Users/User/AppData/Local/Programs/OpenAI/Codex/bin/codex.exe",
+        "CODEX_BRIDGE_CWD": "</path/to/your/working/directory>",
+        "CODEX_BRIDGE_ENTRY": "</path/to/Codex>/bin/codex.exe",
         "CODEX_BRIDGE_TIMEOUT_MS": "300000",
-        "MCP_BRIDGE_LOG_DIR": "C:/Cheerio/Claude/mcp-bridges/logs"
+        "MCP_BRIDGE_LOG_DIR": "</path/to/mcp-bridges>/logs"
       }
     },
     "copilot-bridge": {
       "command": "node",
-      "args": ["C:/Cheerio/Claude/mcp-bridges/src/copilot-bridge.mjs"],
+      "args": ["</path/to/mcp-bridges>/src/copilot-bridge.mjs"],
       "env": {
-        "COPILOT_BRIDGE_CWD": "C:/Cheerio/pi",
-        "COPILOT_BRIDGE_ENTRY": "C:/Users/User/AppData/Roaming/npm/copilot.cmd",
+        "COPILOT_BRIDGE_CWD": "</path/to/your/working/directory>",
+        "COPILOT_BRIDGE_ENTRY": "</path/to/npm/global/bin>/copilot.cmd",
         "COPILOT_BRIDGE_TIMEOUT_MS": "300000",
-        "MCP_BRIDGE_LOG_DIR": "C:/Cheerio/Claude/mcp-bridges/logs"
+        "MCP_BRIDGE_LOG_DIR": "</path/to/mcp-bridges>/logs"
       }
     }
   }

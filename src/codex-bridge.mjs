@@ -2,20 +2,27 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
-import { randomUUID } from "node:crypto";
 import { runCodex, CODEX_CWD } from "../lib/codex.mjs";
 import { appendAudit } from "../lib/audit.mjs";
+import {
+  checkAvailability as defaultCheck,
+  recordBlocked as defaultRecord,
+  clearBlocked as defaultClear,
+  resetProbeClaimedUntil as defaultResetProbe,
+} from "../lib/availability.mjs";
+import { createAskCodexHandler } from "../lib/codex-handler.mjs";
 
-/**
- * Truncate a string to maxLen characters, keeping the HEAD (where errors usually are).
- * Appends a visible marker when truncation occurs.
- */
-function truncate(s, maxLen) {
-  if (!s || s.length <= maxLen) return s || null;
-  return s.slice(0, maxLen) + "... (truncated)";
-}
+// ── Production setup ────────────────────────────────────────────────────────
 
 const server = new McpServer({ name: "codex-bridge", version: "0.1.0" });
+const askCodex = createAskCodexHandler({
+  run: runCodex,
+  audit: appendAudit,
+  checkAvailability: defaultCheck,
+  recordBlocked: defaultRecord,
+  clearBlocked: defaultClear,
+  resetProbeClaimedUntil: defaultResetProbe,
+});
 
 server.registerTool(
   "ask_codex",
@@ -44,64 +51,7 @@ server.registerTool(
       timeout_ms: z.number().int().positive().optional().describe("Hard timeout in ms."),
     },
   },
-  async ({ prompt, session_id, model, sandbox, timeout_ms }) => {
-    const threadId = session_id || randomUUID();
-    let result;
-    try {
-      result = await runCodex({
-        prompt,
-        sessionId: session_id || undefined,
-        model,
-        sandbox: sandbox || "read-only",
-        timeoutMs: timeout_ms,
-      });
-    } catch (err) {
-      await appendAudit("codex", {
-        threadId,
-        prompt,
-        model,
-        sandbox: sandbox || "read-only",
-        spawnError: String(err?.message || err),
-      });
-      return {
-        isError: true,
-        content: [{ type: "text", text: `Failed to launch codex: ${err?.message || err}` }],
-      };
-    }
-
-    const stderrSnippet = result.stderr ? truncate(result.stderr, 2000) : null;
-
-    await appendAudit("codex", {
-      threadId: result.threadId || threadId,
-      prompt,
-      model,
-      sandbox: sandbox || "read-only",
-      exitCode: result.exitCode,
-      timedOut: result.timedOut,
-      hadError: result.hadError,
-      stderr: stderrSnippet,
-      usage: result.usage,
-      durationMs: result.durationMs,
-    });
-
-    const meta = {
-      thread_id: result.threadId || threadId,
-      exit_code: result.exitCode,
-      timed_out: result.timedOut,
-      stderr: stderrSnippet,
-      usage: result.usage,
-    };
-    const body =
-      (result.text || stderrSnippet || "(codex returned no text)") +
-      "\n\n---\n" +
-      "codex-bridge metadata: " +
-      JSON.stringify(meta);
-
-    return {
-      isError: result.hadError,
-      content: [{ type: "text", text: body }],
-    };
-  }
+  askCodex
 );
 
 const transport = new StdioServerTransport();

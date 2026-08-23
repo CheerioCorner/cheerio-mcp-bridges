@@ -2,11 +2,27 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
-import { randomUUID } from "node:crypto";
 import { runPi, PI_CWD } from "../lib/pi.mjs";
 import { appendAudit } from "../lib/audit.mjs";
+import {
+  checkAvailability as defaultCheck,
+  recordBlocked as defaultRecord,
+  clearBlocked as defaultClear,
+  resetProbeClaimedUntil as defaultResetProbe,
+} from "../lib/availability.mjs";
+import { createAskPiHandler } from "../lib/pi-handler.mjs";
+
+// ── Production setup ────────────────────────────────────────────────────────
 
 const server = new McpServer({ name: "pi-bridge", version: "0.1.0" });
+const askPi = createAskPiHandler({
+  run: runPi,
+  audit: appendAudit,
+  checkAvailability: defaultCheck,
+  recordBlocked: defaultRecord,
+  clearBlocked: defaultClear,
+  resetProbeClaimedUntil: defaultResetProbe,
+});
 
 server.registerTool(
   "ask_pi",
@@ -50,66 +66,7 @@ server.registerTool(
       timeout_ms: z.number().int().positive().optional().describe("Hard timeout in ms."),
     },
   },
-  async ({ prompt, session_id, read_only, model, approve_project, enable_extensions, timeout_ms }) => {
-    const sessionId = session_id || randomUUID();
-    let result;
-    try {
-      result = await runPi({
-        prompt,
-        sessionId,
-        readOnly: read_only,
-        model,
-        approveProject: approve_project,
-        enableExtensions: enable_extensions,
-        timeoutMs: timeout_ms,
-      });
-    } catch (err) {
-      await appendAudit("pi", {
-        sessionId,
-        prompt,
-        read_only: !!read_only,
-        model,
-        approve_project: !!approve_project,
-        spawnError: String(err?.message || err),
-      });
-      return {
-        isError: true,
-        content: [{ type: "text", text: `Failed to launch pi: ${err?.message || err}` }],
-      };
-    }
-
-    await appendAudit("pi", {
-      sessionId: result.sessionId,
-      prompt,
-      read_only: !!read_only,
-      model,
-      approve_project: !!approve_project,
-      exitCode: result.exitCode,
-      timedOut: result.timedOut,
-      hadError: result.hadError,
-      toolCalls: result.toolCalls,
-      usage: result.usage,
-      durationMs: result.durationMs,
-    });
-
-    const meta = {
-      session_id: result.sessionId,
-      exit_code: result.exitCode,
-      timed_out: result.timedOut,
-      tools_used: result.toolCalls.map((t) => t.name),
-      usage: result.usage,
-    };
-    const body =
-      (result.text || "(pi returned no text)") +
-      "\n\n---\n" +
-      "pi-bridge metadata: " +
-      JSON.stringify(meta);
-
-    return {
-      isError: result.hadError,
-      content: [{ type: "text", text: body }],
-    };
-  }
+  askPi
 );
 
 const transport = new StdioServerTransport();

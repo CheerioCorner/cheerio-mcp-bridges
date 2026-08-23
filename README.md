@@ -29,6 +29,7 @@
    - codex 預設 sandbox 為 `read-only`（`danger-full-access` 要明確指定）。
    - copilot 預設只帶 `--allow-all-tools`（非互動必要），**不**帶 `--allow-all`（含 paths + urls），後者要 `dangerously_allow_all:true`。
 5. **稽核**：每次呼叫寫一行 JSONL 到 `logs/<pi|agy|codex|copilot>-YYYYMMDD.jsonl`（prompt、session/thread id、exit code、耗時、usage）。
+6. **可用性登記表（避免對已知被限流的 model/host 白打）**：四個 bridge 呼叫 CLI **前**都會先查 `state/availability.json`，命中封鎖中就直接回傳清楚錯誤、不 spawn CLI 浪費呼叫；呼叫**後**若偵測到限流訊號（429/quota/rate limit 等）會自動記錄封鎖時間。也支援人類手動回報「某 model 被鎖到幾點」。完整格式、三種 confidence（`exact` / `estimated` / `human-reported`）行為與手動回報做法，見 [`state/README.md`](state/README.md)。
 
 ## 踩過的坑（實測得出）
 
@@ -138,7 +139,7 @@ copilot login   # 會引導 GitHub 帳號授權
 ## 快速開始
 
 ```bash
-cd C:/Cheerio/Claude/mcp-bridges   # 或你 clone 的路徑
+cd C:/Cheerio/CheerioCorner/mcp-bridges   # 或你 clone 的路徑
 npm install
 npm run doctor        # 檢查哪些 CLI 可用
 npm test              # 執行 parser/arg-builder 單元測試（不花 API 額度）

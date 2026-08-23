@@ -4,17 +4,25 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { z } from "zod";
 import { runAgy, AGY_CWD } from "../lib/agy.mjs";
 import { appendAudit } from "../lib/audit.mjs";
+import {
+  checkAvailability as defaultCheck,
+  recordBlocked as defaultRecord,
+  clearBlocked as defaultClear,
+  resetProbeClaimedUntil as defaultResetProbe,
+} from "../lib/availability.mjs";
+import { createAskAgyHandler } from "../lib/agy-handler.mjs";
 
-/**
- * Truncate a string to maxLen characters, keeping the HEAD where errors usually are.
- * Appends a visible marker when truncation occurs.
- */
-function truncate(s, maxLen) {
-  if (!s || s.length <= maxLen) return s || null;
-  return s.slice(0, maxLen) + "... (truncated)";
-}
+// ── Production setup ────────────────────────────────────────────────────────
 
 const server = new McpServer({ name: "agy-bridge", version: "0.1.0" });
+const askAgy = createAskAgyHandler({
+  run: runAgy,
+  audit: appendAudit,
+  checkAvailability: defaultCheck,
+  recordBlocked: defaultRecord,
+  clearBlocked: defaultClear,
+  resetProbeClaimedUntil: defaultResetProbe,
+});
 
 server.registerTool(
   "ask_agy",
@@ -58,73 +66,7 @@ server.registerTool(
       timeout_ms: z.number().int().positive().optional().describe("Hard timeout in ms."),
     },
   },
-  async ({ prompt, conversation_id, model, effort, sandbox, dangerously_allow_all, timeout_ms }) => {
-    const effectiveSandbox = sandbox !== false;
-    const effectiveDangerouslyAllowAll = dangerously_allow_all !== false;
-    let result;
-    try {
-      result = await runAgy({
-        prompt,
-        conversationId: conversation_id,
-        model,
-        effort,
-        sandbox,
-        dangerouslyAllowAll: dangerously_allow_all,
-        timeoutMs: timeout_ms,
-      });
-    } catch (err) {
-      await appendAudit("agy", {
-        conversationId: conversation_id,
-        prompt,
-        sandbox: effectiveSandbox,
-        dangerously_allow_all: effectiveDangerouslyAllowAll,
-        spawnError: String(err?.message || err),
-      });
-      return {
-        isError: true,
-        content: [{ type: "text", text: `Failed to launch agy: ${err?.message || err}` }],
-      };
-    }
-
-    const stderrSnippet = truncate(result.stderr, 2000);
-
-    await appendAudit("agy", {
-      conversationId: result.conversationId,
-      prompt,
-      sandbox: effectiveSandbox,
-      dangerously_allow_all: effectiveDangerouslyAllowAll,
-      status: result.status,
-      exitCode: result.exitCode,
-      timedOut: result.timedOut,
-      hadError: result.hadError,
-      toolCalls: result.toolCalls,
-      numTurns: result.numTurns,
-      usage: result.usage,
-      durationMs: result.durationMs,
-      stderr: stderrSnippet,
-    });
-
-    const meta = {
-      conversation_id: result.conversationId,
-      status: result.status,
-      exit_code: result.exitCode,
-      timed_out: result.timedOut,
-      num_turns: result.numTurns,
-      tools_used: result.toolCalls,
-      usage: result.usage,
-      stderr: stderrSnippet,
-    };
-    const body =
-      (result.response?.trim() || result.error || "(agy returned no text)") +
-      "\n\n---\n" +
-      "agy-bridge metadata: " +
-      JSON.stringify(meta);
-
-    return {
-      isError: result.hadError,
-      content: [{ type: "text", text: body }],
-    };
-  }
+  askAgy
 );
 
 const transport = new StdioServerTransport();

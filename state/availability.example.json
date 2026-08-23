@@ -1,0 +1,14 @@
+{
+  "version": 1,
+  "updated_at": "2026-08-22T08:00:00.000Z",
+  "entries": {
+    "codex:o3": {
+      "blocked_until": "2026-08-22T09:00:00.000Z",
+      "reason": "rate limit exceeded; retry after 3600 seconds",
+      "confidence": "estimated",
+      "recorded_by": "codex-bridge",
+      "recorded_at": "2026-08-22T08:00:00.000Z",
+      "probe_claimed_until": null
+    }
+  }
+}

@@ -1,2 +1,6 @@
 node_modules/
 logs/
+state/availability.json
+state/availability.lock/
+state/*.tmp
+state/*.corrupt.*
