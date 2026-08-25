@@ -213,3 +213,69 @@ test("'limit reached' → detected", () => {
   const r = detectRateLimit({ stderr: "limit reached for model xyz", exitCode: 1, hadError: true });
   assert.equal(r.limited, true);
 });
+
+// ── W-2026-08-086: timeout must not be scanned as if it were a reported error ──
+//
+// Repeated real-world incident: a CLI (pi/agy/codex/copilot) is killed by our
+// own timeout while doing perfectly normal work. The accumulated stdout at
+// that point is just an ordinary NDJSON stream — thinking deltas, tool-call
+// notifications, token usage counters, ids — none of it a rate-limit report.
+// Before the fix, callers folded `timedOut` into `hadError`, so this content
+// got scanned with the same loose keyword patterns used for genuine CLI
+// errors, and a coincidental substring (e.g. a token count like 14293
+// containing "429") triggered a false positive.
+
+test("bare timeout, ordinary streaming content in stdout → NOT flagged (regression for W-2026-08-086)", () => {
+  // A real captured pi `thinking_end` event, where the token usage total
+  // happens to contain "429" as a substring — this is exactly the shape of
+  // content that used to get misrecorded as a rate-limit block.
+  const thinkingEndEvent = JSON.stringify({
+    type: "message_update",
+    usage: { input_tokens: 14293, output_tokens: 512 },
+    assistantMessageEvent: {
+      type: "thinking_end",
+      contentIndex: 0,
+      content: "現在我已經獲取到第一個頁面的完整內容...",
+    },
+  });
+  const toolcallStartEvent = JSON.stringify({
+    type: "tool_execution_start",
+    toolCallId: "call_9042931",
+    toolName: "read",
+  });
+  const stdout = `${thinkingEndEvent}\n${toolcallStartEvent}\n`;
+
+  // hadError:false (no confirmed CLI-reported error), timedOut:true (we
+  // killed it) — the caller must pass these apart, not folded together.
+  const r = detectRateLimit({ stdout, stderr: "", text: "", exitCode: null, hadError: false, timedOut: true });
+  assert.equal(r.limited, false, "ordinary streaming content during a timeout must never be flagged as a rate limit");
+});
+
+test("bare timeout with no stderr/error signal at all → NOT flagged", () => {
+  const r = detectRateLimit({ stdout: "anything at all, even literal 429 substrings inside ids like id-4293-x", stderr: "", error: "", exitCode: null, hadError: false, timedOut: true });
+  assert.equal(r.limited, false);
+});
+
+test("timeout WITH a genuine rate-limit message on stderr → still detected (stderr/error stay in scope even during timeout)", () => {
+  const r = detectRateLimit({ stdout: "unrelated streaming content", stderr: "429 Too Many Requests", exitCode: null, hadError: false, timedOut: true });
+  assert.equal(r.limited, true, "a real rate-limit signal on stderr must still be caught even if the call also timed out");
+  assert.ok(r.reason.includes("[timeout, unconfirmed]"), "reason should be tagged distinctly from a confirmed CLI-reported error");
+});
+
+test("genuine CLI-reported error (not a timeout) still scans stdout as before", () => {
+  const r = detectRateLimit({
+    stdout: '{"type":"thread.failed","error":"rate limit"}\n',
+    stderr: "429 Too Many Requests\nRetry-After: 3600",
+    exitCode: 1,
+    hadError: true,
+    timedOut: false,
+  });
+  assert.equal(r.limited, true);
+  assert.equal(r.confidence, "exact");
+  assert.ok(!r.reason.includes("[timeout"), "a confirmed error's reason should not carry the timeout marker");
+});
+
+test("'429' inside a larger number is not matched (word boundary)", () => {
+  const r = detectRateLimit({ stderr: "token count 14293 for this request", exitCode: 1, hadError: true });
+  assert.equal(r.limited, false, "\"14293\" must not be misread as the HTTP status 429");
+});
