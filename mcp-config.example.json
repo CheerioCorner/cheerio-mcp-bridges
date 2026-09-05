@@ -1,12 +1,13 @@
 {
   "//": "MENU: Pick only the bridges your machine has CLI support for. Do not copy all four blindly. Replace every </path/...> placeholder below with real absolute paths for this machine.",
+  "//entry": "*_BRIDGE_ENTRY must be the path the CLI package's own package.json \"bin\" field points at — NOT whatever .js file happens to sit in dist/. pi ships an unbundled dist/cli.js that crashes on startup (ERR_MODULE_NOT_FOUND); the working entry is dist/bundle/cli.js. Run `npm run doctor` to have the correct path resolved and verified for you.",
   "mcpServers": {
     "pi-bridge": {
       "command": "node",
       "args": ["</path/to/mcp-bridges>/src/pi-bridge.mjs"],
       "env": {
         "PI_BRIDGE_CWD": "</path/to/your/working/directory>",
-        "PI_BRIDGE_ENTRY": "</path/to/pi-coding-agent>/dist/cli.js",
+        "PI_BRIDGE_ENTRY": "</path/to/pi-coding-agent>/dist/bundle/cli.js",
         "PI_BRIDGE_TIMEOUT_MS": "300000",
         "MCP_BRIDGE_LOG_DIR": "</path/to/mcp-bridges>/logs"
       }
