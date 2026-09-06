@@ -137,11 +137,37 @@ test("buildInvocation: .mjs and .cjs are scripts too", () => {
   }
 });
 
-test("buildInvocation: a .cmd shim needs a shell and forward slashes", () => {
-  const inv = buildInvocation("C:\\Users\\x\\npm\\copilot.cmd", ["--version"]);
-  assert.equal(inv.shell, true);
-  assert.equal(inv.command, "C:/Users/x/npm/copilot.cmd");
-  assert.deepEqual(inv.args, ["--version"]);
+test("buildInvocation: a .cmd shim goes through cmd.exe, never through shell:true", () => {
+  const inv = buildInvocation("C:\\Users\\x\\npm\\copilot.cmd", ["--version"], { comspec: "cmd.exe" });
+  assert.equal(inv.shell, false, "shell:true is what broke codex and copilot on 2026-09-06");
+  assert.equal(inv.command, "cmd.exe");
+  assert.equal(inv.windowsVerbatimArguments, true);
+  assert.deepEqual(inv.args.slice(0, 3), ["/d", "/s", "/c"]);
+  assert.match(inv.args[3], /copilot\.cmd/);
+  assert.match(inv.args[3], /--version/);
+});
+
+test("buildInvocation: a multi-word prompt survives as ONE argument", () => {
+  // The regression itself: `shell: true` handed codex six arguments and it
+  // answered `unexpected argument 'with' found`.
+  const inv = buildInvocation("C:/npm/codex.cmd", ["exec", SMOKE_PROMPT], { comspec: "cmd.exe" });
+  const line = inv.args[3];
+  const quoted = line.match(/\^"[^^]*(?:\^"|$)/g) || [];
+  assert.ok(
+    line.includes("Reply with exactly the two characters: ok"),
+    "the prompt text must still be there, intact"
+  );
+  assert.ok(quoted.length >= 3, "entry + each argument is quoted separately");
+});
+
+test("buildInvocation: shell metacharacters in a prompt cannot become a second command", () => {
+  const inv = buildInvocation("C:/npm/codex.cmd", ["exec", "hello & del /q C:\\x"], {
+    comspec: "cmd.exe",
+  });
+  // An unescaped & would end the codex command and start a del. Escaped, cmd
+  // passes it to codex as text.
+  assert.ok(inv.args[3].includes("^&"), "& must be neutralised for cmd.exe");
+  assert.ok(!/[^^]&/.test(inv.args[3]), "no bare & may reach cmd.exe");
 });
 
 test("buildInvocation: a plain executable is run directly", () => {
@@ -165,8 +191,48 @@ test("buildSmokeInvocation: every CLI sends the prompt through its own headless 
   assert.deepEqual(codex.args.slice(0, 4), ["exec", "--json", "--skip-git-repo-check", SMOKE_PROMPT]);
 
   const copilot = buildSmokeInvocation("copilot", "/x/copilot.cmd");
-  assert.ok(copilot.args.includes("--allow-all-tools"));
-  assert.equal(copilot.shell, true);
+  assert.equal(copilot.shell, false);
+  assert.ok(copilot.args[3].includes("--allow-all-tools"));
+  assert.ok(copilot.args[3].includes(SMOKE_PROMPT), "the prompt must reach copilot as text");
+});
+
+// ── buildSmokeInvocation: claude's moving flag names ─────────────────────────
+
+test("buildSmokeInvocation: without caps, claude gets the newest flag set unchanged", () => {
+  const inv = buildSmokeInvocation("claude", "/x/claude.exe");
+  assert.ok(inv.args.includes("--permission-prompts"));
+  assert.deepEqual(inv.droppedFlags, []);
+  assert.equal(inv.args.at(-1), SMOKE_PROMPT);
+  assert.equal(inv.args.at(-2), "--", "the prompt is positional and must sit behind a bare --");
+});
+
+test("buildSmokeInvocation: a claude build without --permission-prompts still gets a runnable argv", () => {
+  // 2.1.258. The old doctor called this machine broken and told the user to
+  // go log in.
+  const caps = {
+    flags: new Set([
+      "--print",
+      "--output-format",
+      "--safe-mode",
+      "--strict-mcp-config",
+      "--permission-mode",
+      "--restricted",
+    ]),
+    permissionModes: new Set(["acceptEdits", "bypassPermissions", "default", "plan"]),
+  };
+  const inv = buildSmokeInvocation("claude", "/x/claude.exe", { caps });
+
+  assert.ok(!inv.args.includes("--permission-prompts"));
+  assert.ok(!inv.args.includes("none"));
+  assert.ok(!inv.args.includes("manual"), "a mode this build rejects must be replaced");
+  assert.deepEqual(
+    inv.args.slice(inv.args.indexOf("--permission-mode"), inv.args.indexOf("--permission-mode") + 2),
+    ["--permission-mode", "default"]
+  );
+  assert.equal(inv.args.at(-1), SMOKE_PROMPT);
+  // Silent degradation is the failure mode this repo exists to avoid.
+  assert.equal(inv.droppedFlags.length, 2);
+  assert.ok(inv.droppedFlags.some((w) => w.includes("--permission-prompts")));
 });
 
 test("buildSmokeInvocation: the prompt is short and asks for a tiny answer", () => {
