@@ -9,7 +9,7 @@
 | `codex-bridge` | `codex`（OpenAI Codex CLI） | `ask_codex` | Node.js |
 | `copilot-bridge` | `copilot`（GitHub Copilot CLI） | `ask_copilot` | Node.js |
 
-**四個 bridge 彼此獨立，不需要四個都裝。** 先跑 `npm run doctor` 看這台機器有哪些 CLI 可用，只啟用對應的 bridge 就好。
+**五個 bridge 彼此獨立，不需要五個都裝。** 先跑 `npm run doctor` 看這台機器有哪些 CLI 可用，只啟用對應的 bridge 就好。
 
 四個 server 各自暴露**單一、範圍受限**的工具（不是通用 `run_command`）——只能「把一段 prompt 送給那個 agent」。殘餘風險在於底層 CLI 收到 prompt 後自己能做什麼，因此預設姿態偏保守。
 
@@ -42,6 +42,10 @@
 - **Copilot/Codex 都無法非互動查詢剩餘總額度**：
   - Copilot：`copilot billing` / `copilot limits` 是 help topic，只在互動模式 UI 裡有用。非互動 CLI 沒有 `copilot usage` 之類的指令。bridge 只能從 `model.call_failure` 事件裡的 `quotaSnapshots` 拿到「這次失敗時的快照」，無法主動查詢剩餘。
   - Codex：`codex login status` 只顯示登入方式（`Logged in using ChatGPT`），沒有用量/配額查詢。`codex doctor` 只做安裝診斷。bridge 的 `turn.completed.usage` 只有當次 token 用量，無剩餘額度。
+- **claude 的 `-p` 是布林旗標，prompt 是位置參數**：跟 pi／agy／copilot 不同（那三支的 `-p` 吃 prompt 當值）。所以 prompt 必須放在最後、而且前面要有一個裸的 `--`，否則 `--version is not a question` 這種開頭是 dash 的 prompt 會被當成旗標解析。
+- **claude 的 stdin 會等 3 秒**：實測 stderr 會印 `Warning: no stdin data received in 3s, proceeding without it`。bridge 用 `stdio:['ignore',...]`（關閉的 stdin）正好避開，但這也是上面「stdin 必須關閉」那條的另一個例子。
+- **claude 的 `subtype` 不能當錯誤訊號**：unknown model 打回 404 時，`is_error` 是 `true`、`api_error_status` 是 `404`，但 `subtype` 還是 `"success"`。要看 `is_error` 和 `api_error_status`。
+- **claude 的 rate limit 是結構化事件**：`rate_limit_event` 帶 `status` 和精確的 `resetsAt`，不用像其他四支那樣比對錯誤字串。**但同一個事件裡 `status:"allowed"` 可以跟 `overageStatus:"rejected"` 並存** —— 只能看 `status`，寬鬆比對 `"rejected"` 會把健康的帳號鎖掉。
 - **企業級 TLS 攔截 Proxy 可能導致 `npm install` 失敗**：某些組織會使用 TLS 檢查型 Proxy（例如資安廠商的憑證攔截方案）對 HTTPS 流量做中間人解密。這會讓 Node.js 的 TLS 驗證失敗，`npm install` 報 `UNABLE_TO_GET_ISSUER_CERT_LOCALLY` 或 `certificate chain incomplete` 之類的錯誤。解法：設定環境變數 `NODE_EXTRA_CA_CERTS` 指向公司的完整憑證鏈檔案（PEM 格式），注意需要的是 CA 中繼憑證（intermediate cert），不是只有 leaf cert。
 - **企業級 IP allow list 擋 CLI 存取**（bridge 預設已處理）：如果你的帳號所屬的企業級方案（例如 GitHub Copilot Enterprise）啟用了 IP allow list，`ask_copilot` 可能會被 API 擋下（錯誤訊息類似 "enterprise has an IP allow list enabled, and your IP address is not permitted"）。**根本原因通常是**：bridge server 的父進程環境帶有 `HTTP_PROXY`/`HTTPS_PROXY` 之類的 proxy 設定，子進程的 CLI 工具繼承了這些 proxy 變數，導致 OAuth 請求繞經企業 proxy 出去，而 proxy 的出口 IP 不在對方的 allow list 內。**bridge 從 v0.2.0 開始預設會自動 strip 掉子進程 env 裡的 proxy 環境變數**（`HTTP_PROXY`/`HTTPS_PROXY`/`ALL_PROXY` 含大小寫變體），讓 CLI 直接對外連線來避開這個問題。如果你的環境情況相反（必須經過 proxy 才連得到目標服務），可以設 `BRIDGE_BYPASS_PROXY=false` 切回讓子進程繼承 proxy 設定。
 
@@ -49,7 +53,7 @@
 
 ## 跨機器安裝（從零開始）
 
-> 四個 bridge 彼此獨立。先跑 `npm run doctor` 看這台機器有哪些 CLI 可用，**只把對應的 bridge 註冊進 MCP client 設定就好**，其他沒裝的不要加。
+> 五個 bridge 彼此獨立。先跑 `npm run doctor` 看這台機器有哪些 CLI 可用，**只把對應的 bridge 註冊進 MCP client 設定就好**，其他沒裝的不要加。
 
 ### 前置需求
 
@@ -71,7 +75,7 @@ npm run doctor            # 完整檢查（含 smoke test）
 npm run doctor -- --no-smoke   # 只解析入口與 --version，完全不花額度
 ```
 
-會輸出一個表格，告訴你 4 支 CLI 各自：
+會輸出一個表格，告訴你 5 支 CLI 各自：
 
 1. **入口從哪裡解析出來的** — `*_BRIDGE_ENTRY` 環境變數、套件 `package.json` 的 `bin` 欄位、
    還是 PATH。doctor 不會猜路徑，三個來源都沒有就明確報「找不到」。
@@ -127,6 +131,19 @@ copilot login   # 會引導 GitHub 帳號授權
 ```
 
 驗證：`copilot --version`
+
+#### claude（Anthropic Claude Code CLI）
+
+```bash
+npm install -g @anthropic-ai/claude-code
+claude          # 首次啟動會引導登入（訂閱制走 OAuth）
+```
+
+驗證：`claude --version`
+
+> `claude` 是**原生執行檔**（npm 套件的 `bin` 指向 `bin/claude.exe`，各平台的二進位放在
+> `optionalDependencies`）。`CLAUDE_BRIDGE_ENTRY` 直接填那個執行檔的絕對路徑，**前面不要加 `node`**。
+> 官方安裝腳本會裝到 `%USERPROFILE%\.local\bin\claude.exe`。
 
 ### Step 4：選擇性啟用 bridge
 
@@ -215,18 +232,49 @@ npm test              # 執行 parser/arg-builder 單元測試（不花 API 額�
 
 回傳：Copilot 的最終回應 + 一行 `copilot-bridge metadata`（含 `session_id`、`usage`、`quota_snapshots`）。
 
+### `ask_claude`
+| 參數 | 型別 | 預設 | 說明 |
+|------|------|------|------|
+| `prompt` | string | — | 要送給 Claude 的指令（必填） |
+| `session_id` | string | 自動產生 | 帶上一次回傳的值即可續接同一對話 |
+| `read_only` | boolean | false | 加 `--restricted`：拿掉 Bash/PowerShell/REPL 與 WebFetch，檔案工具限制在工作目錄內 |
+| `allow_edits` | boolean | false | 自動核准檔案編輯（`--permission-mode acceptEdits`） |
+| `dangerously_allow_all` | boolean | false | **危險**：`--permission-mode bypassPermissions`，完全不做權限檢查 |
+| `model` | string | — | `haiku` / `sonnet` / `opus` 或完整 model id |
+| `effort` | low\|medium\|high\|xhigh\|max | — | 推理強度 |
+| `max_budget_usd` | number | — | 單次呼叫的花費上限（`--max-budget-usd`） |
+| `timeout_ms` | number | 300000 | 硬性逾時 |
+
+回傳：Claude 的最終回應 + 一行 `claude-bridge metadata`（含 `session_id`、`tools_used`、
+`permission_denials`、`num_turns`、`cost_usd`、`usage`、`rate_limit_status`）。
+
+> **預設是唯讀的**：不帶任何 flag 時 Claude 讀得到檔案，但任何寫入／執行都會被自動拒絕
+> （`--permission-mode manual` ＋ `--permission-prompts none`）。要它真的動手改檔案，
+> 必須明確帶 `allow_edits:true`。
+
+> **被拒絕的工具呼叫會講出來**：Claude 被擋下寫入時，`is_error` 是 `false`、exit code 是 `0`、
+> 回應裡還是會很有自信地說「我改好了」。bridge 會把 `permission_denials` 同時放進 metadata
+> **和回應本文**，避免呼叫端相信一件沒有發生的事。這是這個 repo 最在意的那種靜默失敗。
+
+> **不會載入你的 MCP 設定**：bridge 固定帶 `--strict-mcp-config` 和 `--safe-mode`，所以你的
+> hooks、plugins、CLAUDE.md 和 MCP servers 都不會載入。**這是必要的** —— 否則 `ask_claude`
+> 呼叫出去的 claude 會把 `.mcp.json` 裡的五個 bridge 全部再載一遍。
+> 用的是 `--safe-mode` 而不是 `--bare`：`--bare` 的認證只吃 `ANTHROPIC_API_KEY`／`apiKeyHelper`，
+> 完全不讀 OAuth 和 keychain，訂閱制登入會直接失敗。
+
 > **額度查詢限制**：Copilot CLI 沒有非互動模式的指令能查詢「剩餘總額度」。`copilot billing` / `copilot limits` 只在互動模式的 UI 裡有用。bridge 只能回報「這次呼叫消耗多少」（`usage` + 當次 `quotaSnapshots`），無法回報剩餘總額度。Codex 同理，`codex login status` 只顯示登入狀態，無用量查詢。
 
 ## 環境變數
 
 | 變數 | 必填 | 預設 | 說明 |
 |------|------|------|------|
-| `PI_BRIDGE_CWD` / `AGY_BRIDGE_CWD` / `CODEX_BRIDGE_CWD` / `COPILOT_BRIDGE_CWD` | ✅ | 無 | bridge 釘死的工作目錄，絕對路徑。沒設會在啟動時直接報錯 |
+| `*_BRIDGE_CWD`（PI / AGY / CODEX / COPILOT / CLAUDE） | ✅ | 無 | bridge 釘死的工作目錄，絕對路徑。沒設會在啟動時直接報錯 |
 | `PI_BRIDGE_ENTRY` | ✅ | 無 | pi 的入口。**必須是 pi 套件 `package.json` 的 `bin` 指向的檔案**（目前是 `dist/bundle/cli.js`），不是 `dist/cli.js` — 詳見下方 |
 | `AGY_BRIDGE_ENTRY` | ✅ | 無 | `agy.exe` 絕對路徑 |
 | `CODEX_BRIDGE_ENTRY` | ✅ | 無 | `codex.exe` 絕對路徑 |
 | `COPILOT_BRIDGE_ENTRY` | ✅ | 無 | `copilot.cmd` 絕對路徑 |
-| `PI_BRIDGE_TIMEOUT_MS` / `AGY_BRIDGE_TIMEOUT_MS` / `CODEX_BRIDGE_TIMEOUT_MS` / `COPILOT_BRIDGE_TIMEOUT_MS` | | `300000` | 硬性逾時 |
+| `CLAUDE_BRIDGE_ENTRY` | ✅ | 無 | `claude.exe` 絕對路徑。**是原生執行檔不是 JS**，不要前面加 node |
+| `*_BRIDGE_TIMEOUT_MS`（PI / AGY / CODEX / COPILOT / CLAUDE） | | `300000` | 硬性逾時 |
 | `MCP_BRIDGE_LOG_DIR` | | `<repo>/logs` | 稽核 log 目錄 |
 | `BRIDGE_BYPASS_PROXY` | | `true` | 見下方說明 |
 | `DOCTOR_SMOKE_TIMEOUT_MS` | | `120000` | `npm run doctor` 的 smoke test 逾時 |

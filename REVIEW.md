@@ -1,7 +1,8 @@
 # 架構檢視 — cheerio-mcp-bridges
 
 - 日期：2026-09-05
-- 對象：`fix/pi-bridge-entry-and-error-visibility` 分支的狀態
+- 對象：`feat/claude-bridge-and-per-cli-fixes` 分支的狀態
+- 更新：2026-09-06 —— 加入第 8 節（各 CLI 專屬問題）與第 9 節（新增 bridge 的檢查清單）
 - **立場：只提建議，這份文件不動任何程式碼。** 每一項都標了嚴重度與粗略成本，
   可以當成之後的 backlog 挑著做。
 - 觸發點：2026-09-05 pi-bridge 全面失效 3 小時。那次事故本身已在本分支修掉，
@@ -37,6 +38,7 @@ spawn 出口。四個 bridge 真的彼此獨立，這是刻意的、也值得保
 | `lib/agy-handler.mjs` | 191 | 同上 + `sandbox`/`dangerously_allow_all` 預設值邏輯 |
 | `lib/codex-handler.mjs` | 184 | 同上 |
 | `lib/copilot-handler.mjs` | 192 | 同上 + `quotaSnapshots` |
+| `lib/claude-handler.mjs` | ~215 | 同上 + `permission_denials` 與結構化 rate limit |
 
 把 CLI 名稱正規化後 diff，四個 handler 的**控制流完全一樣**：
 
@@ -374,9 +376,143 @@ state 目錄，rate-limit 狀態才會共用」。
 | 8 | 抽 `createBridgeHandler` | 🟡 中 | 中 | §1.2 |
 | 9 | `requireEnv` 移出 top-level，doctor 共用 argv | 🟢 低 | 中 | §2.2 |
 | 10 | `MCP_BRIDGE_STATE_DIR` | 🟢 低 | 低 | §5.4 |
+| 11 | copilot 補唯讀模式（需在有 copilot 的機器實測） | 🟡 中 | 中 | §8.3 |
+| 12 | 五支的預設安全姿態對齊成一個明確決定 | 🟡 中 | 低 | §8.4 |
+| 13 | agy 逾時時救回部分回應 | 🟡 中 | 低 | §8.5 |
+| 14 | `tools_used` 型別統一 | 🟡 中 | 低 | §8.6 |
+| 15 | 驗證 codex 真實的錯誤事件名稱 | 🟡 中 | 低 | §8.7 |
 
 1 到 5 加起來大概是一個下午，而且都是「讓失敗會出聲」這一類，跟這次事故是同一
 個主題。6 到 8 是結構性的，建議排在同一次重構裡做，不要零散地改四個檔案。
+
+---
+
+## 8. 各 CLI 專屬的問題（2026-09-06 新增）
+
+第 1～7 節講的是共用層。這一節是**單一 CLI 自己的**問題 —— 四份 handler 各自演化的直接後果。
+標 ✅ 的已經在本分支修掉了，其餘是建議。
+
+### 8.1 ✅ codex / copilot 會回傳 CLI 從來不知道的 session id
+
+```js
+// 修正前，lib/codex-handler.mjs 與 lib/copilot-handler.mjs 同樣寫法
+const threadId = session_id || randomUUID();   // 憑空生一個
+...
+sessionId: session_id || undefined,            // 但不傳給 CLI
+...
+thread_id: result.threadId || threadId,        // 回傳時卻拿它當 fallback
+```
+
+CLI 正常時會回報真的 id，看不出問題。但 CLI **在宣告 session 之前就掛掉**時
+（也就是 2026-09-05 那種形狀），fallback 生效，呼叫端拿到一個不存在的 id，
+`codex exec resume <假id>` 從此永遠失敗。
+
+規則寫下來：**回傳的 id 只能是 CLI 認可過的、或呼叫端自己給的。**
+agy 本來就對；pi 也對，因為它把生成的 UUID 真的用 `--session-id` 傳給了 pi；
+claude 同理（`--session-id` 可以指定，實測有效）。只有 codex 和 copilot 兩支違反。
+見 `test/session-id.test.mjs`。
+
+### 8.2 ✅ agy 的 `--print-timeout` 算式在短逾時下是反的
+
+```js
+const secs = Math.max(30, Math.floor((timeoutMs || AGY_TIMEOUT_MS) / 1000) - 5);
+```
+
+這個 flag 存在的目的是「agy 先放棄並吐出乾淨的 `result` 事件，而不是被我們砍掉」。
+所以不變量只有一條：**agy 的軟逾時必須嚴格早於我們的硬 kill。**
+但 `Math.max(30, ...)` 讓每個 35 秒以下的 budget 都違反它 —— 傳 `timeout_ms: 20000`
+會得到 30 秒的軟逾時對上 20 秒的硬 kill，於是每次都被砍，正好是這個 flag 想避免的事。
+下限保護錯了那一端。
+
+### 8.3 🟡 copilot 是唯一沒有唯讀模式的
+
+`--allow-all-tools` 在 `lib/copilot.mjs` 是無條件加的。pi 有 `read_only`、
+codex 有 `sandbox`、agy 有 `sandbox`、claude 有 `read_only` / `allow_edits`，
+只有 copilot 沒有任何辦法限制。
+
+工具描述有誠實寫「非互動模式需要 `--allow-all-tools`（自動加上）」，所以不是隱瞞。
+但如果 copilot CLI 支援 `--deny-tool` 之類的旗標，值得補一個 `read_only` 參數把介面補齊。
+**需要在有 copilot 的機器上實測才能確定做不做得到** —— 不要照著文件猜。
+
+### 8.4 🟡 五支的預設安全姿態應該是一個決定，不是四次意外
+
+| CLI | 預設 | 誰決定的 |
+|---|---|---|
+| codex | `-s read-only` | handler `sandbox \|\| "read-only"` |
+| claude | 讀可以、寫自動拒絕 | 本次刻意設計 |
+| pi | 可讀寫，不跳過權限 | pi 自己的預設 |
+| copilot | `--allow-all-tools` 永遠開 | 無條件 |
+| agy | `--sandbox` **＋ `--dangerously-skip-permissions`** | `!== false` 預設開 |
+
+agy 那個「自動核准所有工具權限」的預設是四支裡最寬的，而且是用
+`if (dangerouslyAllowAll !== false)` 這種預設開啟的寫法達成的。它有被記在工具描述裡
+（為了避免 headless CANCELED/ERROR，見 commit `b5d9cf7`），所以是有理由的 ——
+但這個理由應該和其他四支放在一起比較過。
+
+建議：定一條全 repo 的規則（例如「預設唯讀，寫入要明講」），能做到的就對齊，
+做不到的（agy 可能真的需要）在工具描述裡寫清楚為什麼是例外。
+
+### 8.5 🟡 agy 逾時就一定丟掉部分回應
+
+`parseAgyStream` 只從 `result` 事件取 `response`。逾時被砍時沒有 `result` 事件，
+於是 `response` 一定是空字串 —— 即使 `step_update` 已經串流出半個答案。
+
+claude-bridge 遇到同樣情境會退回去把 assistant 的 text blocks 接起來
+（`parseClaudeStream` 的 `sawResultEvent`）。agy 可以照做。
+
+### 8.6 🟡 `tools_used` 同一個欄位兩種型別
+
+pi 和 claude 給字串陣列（`["Read","Grep"]`），agy 給物件陣列
+（`[{type,state,info}]`）。對 orchestrating agent 來說這是同一個 metadata 欄位。
+建議統一成字串陣列，細節放另一個欄位。
+
+### 8.7 🟡 codex 的錯誤事件名稱沒有驗證過
+
+`parseCodexJson` 的 switch 裡有 `thread.failed` 和 `error`，但檔案自己的註解
+列出的「real output」事件只有 `thread.started` / `turn.started` / `item.completed` /
+`turn.completed` 四個。如果 codex 不是這樣報錯，串流層的錯誤就完全漏掉，
+只剩 exit code 擋著。應該在有 codex 的機器上實際觸發一次錯誤，把真實事件名寫進註解。
+
+### 8.8 🟡 copilot 的 text_delta / message 順序相依
+
+`assistant.text_delta` 是**累加**、`assistant.message` 是**覆蓋**。
+哪個先到會決定最終結果。如果某個版本先送 `assistant.message` 再繼續送 deltas，
+輸出就會壞掉，而且是靜默壞掉（看起來只是答案怪怪的）。
+建議明確定義優先序，並在 `test/copilot-fixtures.mjs` 加一個兩者交錯的 fixture。
+
+### 8.9 🟢 其他小東西
+
+- `lib/codex.mjs` 的 JSDoc 還留著 `@param {number} [o.cwdIndex] Not used`。
+- `lib/copilot.mjs` 的 JSDoc 留著自問自答：`Used to derive --print-timeout? No, copilot doesn't have one.` —— 查證過就寫成結論。
+- copilot 的 `quotaSnapshots` 只在 `model.call_failure` 抓，所以只有失敗時看得到額度。
+
+---
+
+## 9. 新增一支 bridge 時的檢查清單
+
+claude-bridge 是第五支。做的過程中發現，前四支的問題大多是「沒有人把同一份清單走完」。
+把它寫下來，下一支就不用重新踩：
+
+1. **入口是什麼**：JS 腳本（要 `node`）還是原生執行檔？以套件 `package.json` 的 `bin` 為準。
+   claude 是 `bin/claude.exe`，原生執行檔。
+2. **prompt 怎麼傳**：是某個旗標的值，還是位置參數？claude 的 `-p` 是布林旗標，
+   prompt 是位置參數，所以必須放最後並用 `--` 分隔 —— 否則 dash 開頭的 prompt 會被當旗標。
+   **這件事一定要用真的以 `--` 開頭的 prompt 實測。**
+3. **stdin**：會不會等 EOF？（claude 會等 3 秒才放棄。）`stdio:['ignore',...]` 一律要有。
+4. **session id**：CLI 給、還是我們可以指定？不能指定就**絕對不要偽造**（見 §8.1）。
+5. **錯誤訊號**：哪個欄位才是真的？claude 的 `subtype` 在 API 錯誤時還是 `"success"`，
+   要看 `is_error` / `api_error_status`。**用一個一定會失敗的呼叫實測，不要看文件。**
+6. **靜默失敗**：有沒有「exit 0、沒有錯誤、但事情沒發生」的路徑？
+   claude 的 `permission_denials` 就是 —— 被拒絕的寫入不算錯誤，回應還會說改好了。
+7. **rate limit**：有沒有結構化訊號？claude 有 `rate_limit_event`（含精確 `resetsAt`）。
+   有的話優先用，比字串比對可靠得多。**但要看清楚是哪個欄位** ——
+   健康帳號的事件裡 `status:"allowed"` 和 `overageStatus:"rejected"` 是並存的。
+8. **會不會遞迴載入自己**：CLI 會不會讀使用者的 MCP 設定？claude 會，
+   所以固定帶 `--strict-mcp-config`。
+9. **關客製化的旗標會不會順便關掉認證**：claude 的 `--bare` 會 ——
+   它只吃 `ANTHROPIC_API_KEY`／`apiKeyHelper`，不讀 OAuth，訂閱制登入直接失敗。
+   要用 `--safe-mode`。
+10. **doctor**：加進 `CLIS`，並在 `lib/cli-entry.mjs` 補 smoke invocation。
 
 ---
 

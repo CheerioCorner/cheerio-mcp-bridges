@@ -76,6 +76,20 @@ export const CLIS = [
     installHint: "npm install -g @github/copilot-cli",
     loginHint: "copilot login（會引導 GitHub 帳號授權）",
   },
+  {
+    name: "claude",
+    bridge: "claude-bridge",
+    tool: "ask_claude",
+    envVar: "CLAUDE_BRIDGE_ENTRY",
+    cwdVar: "CLAUDE_BRIDGE_CWD",
+    // package.json 的 bin 指向 bin/claude.exe —— 是原生執行檔不是 JS 腳本，
+    // 所以 buildInvocation 會直接執行它，不會前置 node。
+    npmPackage: "@anthropic-ai/claude-code",
+    binName: "claude",
+    versionCmd: ["--version"],
+    installHint: "npm install -g @anthropic-ai/claude-code（或官方安裝腳本）",
+    loginHint: "claude 首次啟動會引導登入（訂閱制走 OAuth）",
+  },
 ];
 
 const VERSION_TIMEOUT_MS = 8000;
@@ -187,20 +201,19 @@ export async function checkOne(cli, { smoke }) {
     cwd,
   });
   const version = versionRes.ok ? firstLine(versionRes.stdout || versionRes.output) : null;
-
-  if (!versionRes.ok) {
-    return {
-      ...cli,
-      entry: resolved.path,
-      entrySource: resolved.source,
-      status: "version_failed",
-      note: errorHead(versionRes) || "版本檢查失敗（可能需要登入）",
-    };
-  }
+  const versionNote = versionRes.ok ? null : errorHead(versionRes) || "版本檢查失敗（可能需要登入）";
 
   if (!smoke) {
-    return { ...cli, entry: resolved.path, entrySource: resolved.source, status: "version_only", version, note: version };
+    // 沒有 smoke test 時，--version 是我們僅有的訊號，失敗就只能當失敗。
+    return versionRes.ok
+      ? { ...cli, entry: resolved.path, entrySource: resolved.source, status: "version_only", version, note: version }
+      : { ...cli, entry: resolved.path, entrySource: resolved.source, status: "version_failed", note: versionNote };
   }
+
+  // --version 失敗不直接結案 —— smoke test 是比它強的訊號，所以讓 smoke 來裁決。
+  // 這不是理論：某些受限環境的 claude 包裝腳本只接受 `claude -p "<prompt>"`，
+  // --version 會直接非 0 退出，但實際送 prompt 完全正常。反過來（--version 過
+  // 但跑不動）正是 2026-09-05 的 pi。兩個方向都只有 smoke test 講得準。
 
   // ── 真正的 smoke test：跑完整條路徑 ────────────────────────────────────────
   const smokeRes = await runWithTimeout(buildSmokeInvocation(cli.name, resolved.path), {
@@ -219,6 +232,7 @@ export async function checkOne(cli, { smoke }) {
       entrySource: resolved.source,
       status: "smoke_failed",
       version,
+      versionFailed: !versionRes.ok,
       note: `${why}｜${errorHead(smokeRes) || "（沒有任何 stderr）"}`,
       smokeMs: smokeRes.durationMs,
     };
@@ -230,7 +244,10 @@ export async function checkOne(cli, { smoke }) {
     entrySource: resolved.source,
     status: "ok",
     version,
-    note: `${version}（smoke ${Math.round(smokeRes.durationMs / 1000)}s）`,
+    versionFailed: !versionRes.ok,
+    note: versionRes.ok
+      ? `${version}（smoke ${Math.round(smokeRes.durationMs / 1000)}s）`
+      : `smoke 通過（${Math.round(smokeRes.durationMs / 1000)}s）但 --version 失敗：${versionNote}`,
     smokeMs: smokeRes.durationMs,
   };
 }
@@ -312,7 +329,11 @@ async function main() {
         console.log(`      安裝：${r.installHint}`);
         console.log(`      或直接在 MCP server 的 env 設定 ${r.envVar} 為絕對路徑`);
       } else if (r.status === "smoke_failed") {
-        console.log(`      入口存在且 --version 正常，但實際跑一個 prompt 失敗 ——`);
+        console.log(
+          r.versionFailed
+            ? `      入口找得到，但 --version 和實際 prompt 都失敗了 ——`
+            : `      入口存在且 --version 正常，但實際跑一個 prompt 失敗 ——`
+        );
         console.log(`      通常是入口檔本身壞掉（相依沒裝）或尚未登入：${r.loginHint}`);
       } else {
         console.log(`      登入：${r.loginHint}`);

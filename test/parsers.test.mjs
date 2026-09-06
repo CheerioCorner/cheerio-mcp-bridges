@@ -1,5 +1,5 @@
 /**
- * Parser & builder tests for all four CLI wrappers.
+ * Parser & builder tests for the CLI wrappers.
  *
  * We use dynamic imports with dummy env vars because the lib modules call
  * requireEnv() at module level. The actual CLI paths do not matter -- we only
@@ -24,6 +24,7 @@ const { buildPiArgs, parsePiJson, READ_ONLY_TOOLS } = await import("../lib/pi.mj
 const { buildAgyArgs, parseAgyStream } = await import("../lib/agy.mjs");
 const { buildCodexArgs, parseCodexJson } = await import("../lib/codex.mjs");
 const { buildCopilotArgs, parseCopilotJson } = await import("../lib/copilot.mjs");
+const { agyPrintTimeoutSeconds, AGY_TERMINAL_STATUSES } = await import("../lib/agy.mjs");
 const {
   CODEX_SUCCESS,
   CODEXThreadId,
@@ -283,4 +284,43 @@ test("parseCopilotJson: ignores MCP server status noise", () => {
   const r = parseCopilotJson(noisy);
   assert.equal(r.sessionId, COPILOTSessionId);
   assert.equal(r.hadError, false);
+});
+
+// ── agy --print-timeout ──────────────────────────────────────────────────────
+// The flag exists so agy gives up FIRST and emits a clean `result` event
+// instead of us killing it mid-run. So there is exactly one invariant.
+
+test("agy --print-timeout always lands strictly before our hard kill", () => {
+  for (const budgetMs of [300000, 120000, 60000, 35000, 34000, 30000, 20000, 10000, 5000, 2000]) {
+    const secs = agyPrintTimeoutSeconds(budgetMs);
+    assert.ok(
+      secs * 1000 < budgetMs,
+      `budget ${budgetMs}ms produced a ${secs}s soft timeout — agy would be killed before it could answer`
+    );
+    assert.ok(secs >= 1);
+  }
+});
+
+test("agy --print-timeout: the old Math.max(30, ...) regression is gone", () => {
+  // Before: a 20s budget produced a 30s --print-timeout, so we killed agy every
+  // single time — the exact opposite of what the flag is for.
+  assert.ok(agyPrintTimeoutSeconds(20000) < 20, "20s budget must not yield a 30s soft timeout");
+  assert.equal(agyPrintTimeoutSeconds(20000), 18);
+  // The default budget keeps its original 5s margin.
+  assert.equal(agyPrintTimeoutSeconds(300000), 295);
+});
+
+test("agy --print-timeout is wired into the argv", () => {
+  const args = buildAgyArgs({ prompt: "hi", timeoutMs: 20000 });
+  const i = args.indexOf("--print-timeout");
+  assert.notEqual(i, -1);
+  assert.equal(args[i + 1], "18s");
+});
+
+test("AGY_TERMINAL_STATUSES documents the value space runAgy checks against", () => {
+  assert.ok(AGY_TERMINAL_STATUSES.includes("SUCCESS"));
+  for (const bad of ["ERROR", "CANCELED", "INTERRUPTED", "INVALID", "WAITING"]) {
+    assert.ok(AGY_TERMINAL_STATUSES.includes(bad));
+    assert.notEqual(bad, "SUCCESS");
+  }
 });
