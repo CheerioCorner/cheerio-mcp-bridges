@@ -67,10 +67,24 @@ npm install
 ### Step 2：檢查哪些 CLI 可用
 
 ```bash
-npm run doctor
+npm run doctor            # 完整檢查（含 smoke test）
+npm run doctor -- --no-smoke   # 只解析入口與 --version，完全不花額度
 ```
 
-會輸出一個表格，告訴你 4 支 CLI 各自找到了沒有、能不能正常執行 `--version`，以及建議啟用哪些 bridge。
+會輸出一個表格，告訴你 4 支 CLI 各自：
+
+1. **入口從哪裡解析出來的** — `*_BRIDGE_ENTRY` 環境變數、套件 `package.json` 的 `bin` 欄位、
+   還是 PATH。doctor 不會猜路徑，三個來源都沒有就明確報「找不到」。
+2. **`--version` 過不過**
+3. **smoke test 過不過** — 真的送一個極短 prompt 跑完整條路徑，確認 exit code 是 0
+   而且有非空輸出。
+
+第 3 項是重點：`--version` 在某些 CLI 上會在載入完整相依之前就先印版本退出，所以
+「`--version` 過了」不等於「這支 CLI 能用」。2026-09-05 pi 全面失效那次就是這樣 ——
+入口檔一 import 就 `ERR_MODULE_NOT_FOUND`，但 `--version` 照樣過。smoke test 每支 CLI
+只送一個 prompt，成本可忽略；真的不想花就加 `--no-smoke`。
+
+有任何 bridge 檢查失敗時 doctor 會以 exit code 1 結束，方便掛進 CI 或啟動前檢查。
 
 ### Step 3：安裝你需要的 CLI（如果還沒裝）
 
@@ -141,7 +155,7 @@ copilot login   # 會引導 GitHub 帳號授權
 ```bash
 cd C:/Cheerio/CheerioCorner/mcp-bridges   # 或你 clone 的路徑
 npm install
-npm run doctor        # 檢查哪些 CLI 可用
+npm run doctor        # 檢查哪些 CLI 可用（含 smoke test；--no-smoke 可跳過）
 npm test              # 執行 parser/arg-builder 單元測試（不花 API 額度）
 ```
 
@@ -205,19 +219,32 @@ npm test              # 執行 parser/arg-builder 單元測試（不花 API 額�
 
 ## 環境變數
 
-| 變數 | 預設 |
-|------|------|
-| `PI_BRIDGE_CWD` / `AGY_BRIDGE_CWD` | `C:/Cheerio/pi` |
-| `PI_BRIDGE_ENTRY` | pi 的 `dist/cli.js` 全域路徑 |
-| `AGY_BRIDGE_ENTRY` | `agy.exe` 路徑 |
-| `PI_BRIDGE_TIMEOUT_MS` / `AGY_BRIDGE_TIMEOUT_MS` | `300000` |
-| `CODEX_BRIDGE_CWD` | `C:/Cheerio` |
-| `CODEX_BRIDGE_ENTRY` | `codex.exe` 路徑 |
-| `CODEX_BRIDGE_TIMEOUT_MS` | `300000` |
-| `COPILOT_BRIDGE_CWD` | `C:/Cheerio` |
-| `COPILOT_BRIDGE_ENTRY` | `copilot.cmd` 路徑 |
-| `COPILOT_BRIDGE_TIMEOUT_MS` | `300000` |
-| `MCP_BRIDGE_LOG_DIR` | `<repo>/logs` |
-| `BRIDGE_BYPASS_PROXY` | `true` |
+| 變數 | 必填 | 預設 | 說明 |
+|------|------|------|------|
+| `PI_BRIDGE_CWD` / `AGY_BRIDGE_CWD` / `CODEX_BRIDGE_CWD` / `COPILOT_BRIDGE_CWD` | ✅ | 無 | bridge 釘死的工作目錄，絕對路徑。沒設會在啟動時直接報錯 |
+| `PI_BRIDGE_ENTRY` | ✅ | 無 | pi 的入口。**必須是 pi 套件 `package.json` 的 `bin` 指向的檔案**（目前是 `dist/bundle/cli.js`），不是 `dist/cli.js` — 詳見下方 |
+| `AGY_BRIDGE_ENTRY` | ✅ | 無 | `agy.exe` 絕對路徑 |
+| `CODEX_BRIDGE_ENTRY` | ✅ | 無 | `codex.exe` 絕對路徑 |
+| `COPILOT_BRIDGE_ENTRY` | ✅ | 無 | `copilot.cmd` 絕對路徑 |
+| `PI_BRIDGE_TIMEOUT_MS` / `AGY_BRIDGE_TIMEOUT_MS` / `CODEX_BRIDGE_TIMEOUT_MS` / `COPILOT_BRIDGE_TIMEOUT_MS` | | `300000` | 硬性逾時 |
+| `MCP_BRIDGE_LOG_DIR` | | `<repo>/logs` | 稽核 log 目錄 |
+| `BRIDGE_BYPASS_PROXY` | | `true` | 見下方說明 |
+| `DOCTOR_SMOKE_TIMEOUT_MS` | | `120000` | `npm run doctor` 的 smoke test 逾時 |
+
+所有 `*_BRIDGE_CWD` / `*_BRIDGE_ENTRY` 都**沒有內建預設值**：這些是各機器不同的路徑，
+埋一個 fallback 只會讓設錯的人以為自己設對了，然後跑到別人的目錄或不存在的執行檔上。
+沒設就在啟動時報錯，錯誤會直接出現在 MCP 連線狀態裡。
+
+### `PI_BRIDGE_ENTRY` 為什麼特別容易設錯
+
+pi 的 `dist/` 底下同時有兩個入口：
+
+- `dist/cli.js` — **未打包**，會 `import` 沒有安裝的 `@earendil-works/pi-server`，
+  一啟動就 `ERR_MODULE_NOT_FOUND`（2026-09-05 的 3 小時全面失效就是這樣來的）
+- `dist/bundle/cli.js` — 相依已打包，這才是 `package.json` 的 `bin` 真正指向的檔案
+
+規則很簡單：**入口以套件自己的 `package.json` `bin` 欄位為準**，不要看 `dist/` 底下
+有什麼就填什麼。`npm run doctor` 會替你動態解析出正確路徑，並實際送一個 prompt
+驗證它真的跑得起來。
 
 `BRIDGE_BYPASS_PROXY`：bridge 預設會在呼叫底層 CLI 前 strip 掉子進程 env 裡的 `HTTP_PROXY`/`HTTPS_PROXY`/`ALL_PROXY`（含大小寫變體），避免子進程被父進程繼承到的企業 proxy 設定牽連。只有明確設成字串 `"false"` 時才關閉 strip 行為。

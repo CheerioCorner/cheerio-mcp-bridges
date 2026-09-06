@@ -57,6 +57,32 @@ const FAKE_TIMEOUT_ERR = {
   durationMs: 300000,
 };
 
+// W-2026-08-086 regression fixture: the CLI was killed by our own timeout
+// while doing perfectly ordinary work. Its runner (runPi/runAgy/runCodex/
+// runCopilot) folds `timedOut` into `hadError`, exactly like FAKE_TIMEOUT_ERR
+// above — but here stdout is a real-shaped NDJSON stream (thinking_end / a
+// tool-call notification) whose usage/id fields happen to contain "429" as a
+// substring. Before the fix, this got scanned and misrecorded as a rate limit.
+const FAKE_TIMEOUT_WITH_NORMAL_STREAM = {
+  threadId: null,
+  text: "",
+  usage: null,
+  exitCode: null,
+  timedOut: true,
+  hadError: true, // folded-in by the runner, same as any real timeout
+  stdout:
+    JSON.stringify({
+      type: "message_update",
+      usage: { input_tokens: 14293, output_tokens: 512 },
+      assistantMessageEvent: { type: "thinking_end", contentIndex: 0, content: "現在我已經獲取到第一個頁面的完整內容..." },
+    }) +
+    "\n" +
+    JSON.stringify({ type: "tool_execution_start", toolCallId: "call_9042931", toolName: "read" }) +
+    "\n",
+  stderr: "",
+  durationMs: 300000,
+};
+
 // ── State ───────────────────────────────────────────────────────────────────
 
 let dir;
@@ -350,6 +376,24 @@ test("spawn error with rate-limit text -> recordBlocked called", async () => {
   const result = await h({ prompt: "trigger spawn error" });
   assert.equal(result.isError, true);
   assert.equal(recordCalled, true, "recordBlocked should fire on spawn error with rate-limit text");
+});
+
+test("W-2026-08-086 regression: timeout with ordinary NDJSON stream content -> no recordBlocked", async () => {
+  let recordCalled = false;
+  const h = handler({
+    run: async () => FAKE_TIMEOUT_WITH_NORMAL_STREAM,
+    recordBlocked: async (name, opts) => { recordCalled = true; return store.recordBlocked(name, opts); },
+  });
+
+  await h({ prompt: "long-running but healthy call that outran our timeout" });
+  assert.equal(
+    recordCalled,
+    false,
+    "a bare timeout must never record a block just because its accumulated stdout contains an ordinary NDJSON event with a numeric substring like \"429\""
+  );
+
+  const raw = JSON.parse(await readFile(join(dir, "availability.json"), "utf8").catch(() => "{\"entries\":{}}"));
+  assert.equal(raw.entries?.["codex:default"], undefined, "no entry should be written for codex:default");
 });
 
 test("spawn error without rate-limit text -> no recordBlocked", async () => {
