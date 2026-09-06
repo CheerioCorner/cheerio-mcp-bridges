@@ -21,7 +21,11 @@
    - agy：無法預指定 id，第一次跑完從 `--output-format stream-json` 的 `conversation_id` 撈出來回傳；之後用 `--conversation <id>` 續接。
    - codex：第一次跑完從 `thread.started` 事件的 `thread_id` 撈出來回傳；之後用 `codex exec resume <id>` 續接。
    - copilot：server 自己產生 UUID → `--session-id`，第一次呼叫就把 id 回傳；之後帶同一個 id 續接。
-3. **零 shell 注入**：四邊都 `shell:false` 直接 spawn，prompt 當作單一 argv 元素，任何 shell 特殊字元都不會被解讀。
+3. **零 shell 注入**：全部都 `shell:false` 直接 spawn，prompt 當作單一 argv 元素，任何 shell 特殊字元都不會被解讀。
+   Windows 上的 `.cmd` / `.bat` shim（`codex.cmd`、`copilot.cmd`）不能直接 CreateProcess，走
+   `lib/win-args.mjs` 自己組 `cmd.exe /d /s /c` 命令列並逐一跳脫，**不用 `shell:true`** ——
+   Node 在 `shell:true` 下不會替 argv 加引號（DEP0190），prompt 會被 cmd.exe 拆成好幾個參數，
+   而且帶 `&` 的 prompt 等於命令注入。
 4. **保守的權限旗標**：
    - **預設允許讀寫**檔案（符合使用者選擇），但寫入/危險能力仍分段控制。
    - pi 預設**不**帶專案信任 `-a`（`approve_project` 才開）。
@@ -251,6 +255,14 @@ npm test              # 執行 parser/arg-builder 單元測試（不花 API 額�
 > **預設是唯讀的**：不帶任何 flag 時 Claude 讀得到檔案，但任何寫入／執行都會被自動拒絕
 > （`--permission-mode manual` ＋ `--permission-prompts none`）。要它真的動手改檔案，
 > 必須明確帶 `allow_edits:true`。
+
+> **旗標會依 CLI 版本自動降級**：Claude Code 的旗標名稱會在小版號之間變動 ——
+> 2.1.263 有 `--permission-prompts`，2.1.258 沒有，送過去就是
+> `unknown option`，整支 bridge 全掛。所以 bridge 啟動時會跑一次 `claude --help`
+> （不花額度、不用登入），只送這個版本認得的旗標；被拿掉或替換掉的每一個都會寫一行
+> `[claude-bridge] …` 到 stderr，也放在回傳的 `flagWarnings` 裡。權限旗標被拔掉是會改變
+> 這次執行能做什麼的事，不能安靜地發生。`npm run doctor` 用同一套機制，並在報表裡列出
+> 「版本差異（已自動降級）」。
 
 > **被拒絕的工具呼叫會講出來**：Claude 被擋下寫入時，`is_error` 是 `false`、exit code 是 `0`、
 > 回應裡還是會很有自信地說「我改好了」。bridge 會把 `permission_denials` 同時放進 metadata

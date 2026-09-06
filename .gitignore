@@ -4,3 +4,4 @@ state/availability.json
 state/availability.lock/
 state/*.tmp
 state/*.corrupt.*
+.claude/
