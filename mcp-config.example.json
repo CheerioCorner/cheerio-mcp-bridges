@@ -4,7 +4,9 @@
   "mcpServers": {
     "pi-bridge": {
       "command": "node",
-      "args": ["</path/to/mcp-bridges>/src/pi-bridge.mjs"],
+      "args": [
+        "</path/to/mcp-bridges>/src/pi-bridge.mjs"
+      ],
       "env": {
         "PI_BRIDGE_CWD": "</path/to/your/working/directory>",
         "PI_BRIDGE_ENTRY": "</path/to/pi-coding-agent>/dist/bundle/cli.js",
@@ -14,7 +16,9 @@
     },
     "agy-bridge": {
       "command": "node",
-      "args": ["</path/to/mcp-bridges>/src/agy-bridge.mjs"],
+      "args": [
+        "</path/to/mcp-bridges>/src/agy-bridge.mjs"
+      ],
       "env": {
         "AGY_BRIDGE_CWD": "</path/to/your/working/directory>",
         "AGY_BRIDGE_ENTRY": "</path/to/agy>/bin/agy.exe",
@@ -24,7 +28,9 @@
     },
     "codex-bridge": {
       "command": "node",
-      "args": ["</path/to/mcp-bridges>/src/codex-bridge.mjs"],
+      "args": [
+        "</path/to/mcp-bridges>/src/codex-bridge.mjs"
+      ],
       "env": {
         "CODEX_BRIDGE_CWD": "</path/to/your/working/directory>",
         "CODEX_BRIDGE_ENTRY": "</path/to/Codex>/bin/codex.exe",
@@ -34,13 +40,28 @@
     },
     "copilot-bridge": {
       "command": "node",
-      "args": ["</path/to/mcp-bridges>/src/copilot-bridge.mjs"],
+      "args": [
+        "</path/to/mcp-bridges>/src/copilot-bridge.mjs"
+      ],
       "env": {
         "COPILOT_BRIDGE_CWD": "</path/to/your/working/directory>",
         "COPILOT_BRIDGE_ENTRY": "</path/to/npm/global/bin>/copilot.cmd",
         "COPILOT_BRIDGE_TIMEOUT_MS": "300000",
         "MCP_BRIDGE_LOG_DIR": "</path/to/mcp-bridges>/logs"
       }
+    },
+    "claude-bridge": {
+      "command": "node",
+      "args": [
+        "</path/to/mcp-bridges>/src/claude-bridge.mjs"
+      ],
+      "env": {
+        "CLAUDE_BRIDGE_CWD": "</path/to/your/working/directory>",
+        "CLAUDE_BRIDGE_ENTRY": "</path/to>/claude.exe",
+        "CLAUDE_BRIDGE_TIMEOUT_MS": "300000",
+        "MCP_BRIDGE_LOG_DIR": "</path/to/mcp-bridges>/logs"
+      }
     }
-  }
+  },
+  "//claude": "claude-bridge runs the Claude Code CLI with --safe-mode and --strict-mcp-config, so it does NOT load the MCP servers in this file — otherwise every ask_claude call would boot all five bridges inside itself. CLAUDE_BRIDGE_ENTRY is a native executable (claude.exe), not a JS file: do not prefix it with node."
 }
